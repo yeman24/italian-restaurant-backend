@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  SOMMELIER
+  STAFF
+  CUSTOMER
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  SEATED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum DiningSection {
+  DINING_ROOM
+  CHEFS_COUNTER
+  VAULT_ALCOVE
+}
+
+enum DiningService {
+  LUNCH
+  DINNER
+}
+
+enum InquiryType {
+  GENERAL
+  PRIVATE_DINING
+  CELLAR_MASTER
+  PRESS
+}
+
+enum InquiryStatus {
+  UNREAD
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum GalleryCategory {
+  CULINARY
+  AMBIANCE
+  CELLAR
+  KITCHEN
+}
+
+model User {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  role         Role           @default(CUSTOMER)
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  refreshTokens RefreshToken[]
+  reservations  Reservation[]
+  reviews       Review[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Restaurant {
+  id            String   @id @default(uuid())
+  name          String   @default("AURA Edinburgh")
+  slug          String   @unique @default("aura-edinburgh")
+  stars         String   @default("Two Michelin Stars")
+  chefPatron    String   @default("Euan Macleod")
+  headSommelier String   @default("Fiona Sinclair")
+  address       String   @default("14–16 Royal Terrace Vaults, Edinburgh, EH7 5TB, Scotland")
+  phone         String   @default("+44 (0)131 556 8920")
+  email         String   @default("reservations@aura-edinburgh.com")
+  maxCapacity   Int      @default(28)
+  openingHours  Json
+  coordinates   Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("restaurants")
+}
+
+model Category {
+  id           String   @id @default(uuid())
+  slug         String   @unique
+  name         String
+  description  String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  dishes Dish[]
+
+  @@map("categories")
+}
+
+model Dish {
+  id                   String   @id @default(uuid())
+  slug                 String   @unique
+  name                 String
+  gaelicName           String?
+  categoryId           String
+  courseNumber         Int?
+  description          String
+  story                String   @db.Text
+  provenance           String
+  price                Decimal  @db.Decimal(10, 2)
+  image                String
+  isSignature          Boolean  @default(false)
+  isChefRecommendation Boolean  @default(false)
+  winePairing          Json?
+  dietary              String[]
+  allergens            String[]
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+  @@map("dishes")
+}
+
+model TastingMenu {
+  id                   String   @id @default(uuid())
+  slug                 String   @unique
+  title                String
+  subtitle             String
+  description          String   @db.Text
+  price                Decimal  @db.Decimal(10, 2)
+  pairingPrice         Decimal  @db.Decimal(10, 2)
+  prestigePairingPrice Decimal  @db.Decimal(10, 2)
+  coursesCount         Int      @default(8)
+  duration             String   @default("3 hours")
+  isActive             Boolean  @default(true)
+  courses              Json
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("tasting_menus")
+}
+
+model DiningTable {
+  id          String        @id @default(uuid())
+  tableNumber Int           @unique
+  capacity    Int
+  section     DiningSection @default(DINING_ROOM)
+  isAvailable Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  reservations Reservation[]
+
+  @@map("dining_tables")
+}
+
+model Reservation {
+  id                String            @id @default(uuid())
+  confirmationCode  String            @unique
+  date              DateTime          @db.Date
+  timeSlot          String
+  service           DiningService     @default(DINNER)
+  guestsCount       Int
+  status            ReservationStatus @default(CONFIRMED)
+  experienceName    String
+  pairingTier       String            @default("none")
+  seatingPreference DiningSection     @default(DINING_ROOM)
+  fullName          String
+  email             String
+  phone             String
+  dietaryNotes      String?           @db.Text
+  specialOccasion   String?
+  totalEstimate     Decimal           @db.Decimal(10, 2)
+  depositAmount     Decimal           @default(0.00) @db.Decimal(10, 2)
+  tableId           String?
+  userId            String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  table   DiningTable? @relation(fields: [tableId], references: [id], onDelete: SetNull)
+  user    User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  payment Payment?
+
+  @@index([date, timeSlot])
+  @@index([email])
+  @@map("reservations")
+}
+
+model Payment {
+  id                    String        @id @default(uuid())
+  reservationId         String        @unique
+  stripePaymentIntentId String?       @unique
+  stripeClientSecret    String?
+  amount                Decimal       @db.Decimal(10, 2)
+  currency              String        @default("gbp")
+  status                PaymentStatus @default(PENDING)
+  metadata              Json?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model Review {
+  id          String   @id @default(uuid())
+  publication String
+  author      String
+  quote       String   @db.Text
+  rating      String
+  year        String
+  badge       String?
+  isApproved  Boolean  @default(true)
+  isFeatured  Boolean  @default(false)
+  userId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("reviews")
+}
+
+model GalleryItem {
+  id           String          @id @default(uuid())
+  title        String
+  category     GalleryCategory @default(CULINARY)
+  imageUrl     String
+  publicId     String?
+  caption      String?
+  aspect       String          @default("square")
+  displayOrder Int             @default(0)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@map("gallery_items")
+}
+
+model ContactMessage {
+  id            String         @id @default(uuid())
+  name          String
+  email         String
+  phone         String?
+  inquiryType   InquiryType    @default(GENERAL)
+  status        InquiryStatus  @default(UNREAD)
+  preferredDate DateTime?      @db.Date
+  guestsCount   Int?
+  message       String         @db.Text
+  replyNotes    String?        @db.Text
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@map("contact_messages")
+}
+
+model NewsletterSubscriber {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("newsletter_subscribers")
+}

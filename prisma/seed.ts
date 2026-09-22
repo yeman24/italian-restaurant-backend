@@ -1,15 +1,25 @@
 import { PrismaClient, Role, DiningSection, GalleryCategory, Prisma } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('--- Seeding AURA Edinburgh Database ---');
 
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to run the development seed script in production.');
+  }
+
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
+  const sommelierPassword = process.env.SEED_SOMMELIER_PASSWORD;
+  if (!adminPassword || !sommelierPassword) {
+    throw new Error('Set SEED_ADMIN_PASSWORD and SEED_SOMMELIER_PASSWORD before seeding.');
+  }
+
   // 1. Seed Users (Admin & Sommelier)
   const salt = await bcrypt.genSalt(10);
-  const adminPasswordHash = await bcrypt.hash('AuraEdinburgh2025!', salt);
-  const sommelierPasswordHash = await bcrypt.hash('CellarMaster2025!', salt);
+  const adminPasswordHash = await bcrypt.hash(adminPassword, salt);
+  const sommelierPasswordHash = await bcrypt.hash(sommelierPassword, salt);
 
   const admin = await prisma.user.upsert({
     where: { email: 'admin@aura-edinburgh.com' },
@@ -205,7 +215,7 @@ async function main() {
       story: 'From the Reade family farm in Tobermory, where cows feed on fermented spent distillery grains.',
       provenance: 'Sgriob-ruadh Farm, Tobermory, Isle of Mull',
       price: new Prisma.Decimal(22),
-      image: 'https://images.unsplash.com/photo-1622978303702-c61ed86e4934?auto=format&fit=crop&w=1200&q=85',
+      image: '/images/gougeres.jpg',
       isSignature: true,
       isChefRecommendation: false,
       winePairing: {
@@ -251,7 +261,7 @@ async function main() {
       story: 'Hand-picked during misty autumn dawns in the Caledonian pine forests near Inverness.',
       provenance: 'Strathspey Forests, Inverness-shire',
       price: new Prisma.Decimal(32),
-      image: 'https://images.unsplash.com/photo-1643879397174-4f10ac503566?auto=format&fit=crop&w=1200&q=85',
+      image: '/images/chanterelles.jpg',
       isSignature: false,
       isChefRecommendation: true,
       winePairing: {
@@ -274,7 +284,7 @@ async function main() {
       story: 'East Lothian organic celeriac encased in Fife coastal kelp dough.',
       provenance: 'East Lothian Organic Farm, East Lothian',
       price: new Prisma.Decimal(30),
-      image: 'https://images.unsplash.com/photo-1618804213547-72a18e36b709?auto=format&fit=crop&w=1200&q=85',
+      image: '/images/celeriac.jpg',
       isSignature: true,
       isChefRecommendation: false,
       winePairing: {
@@ -338,7 +348,7 @@ async function main() {
   for (const dish of dishesData) {
     await prisma.dish.upsert({
       where: { slug: dish.slug },
-      update: {},
+      update: dish,
       create: dish,
     });
   }
@@ -426,6 +436,8 @@ async function main() {
   console.log('✔ Seeded Reviews & Accolades');
 
   // 8. Seed Gallery Items
+  await prisma.galleryItem.deleteMany({});
+
   const gallery = [
     {
       title: 'The Plated Scallop',
@@ -436,13 +448,13 @@ async function main() {
     {
       title: 'The Vault Dining Room',
       category: GalleryCategory.AMBIANCE,
-      imageUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=85',
+      imageUrl: '/images/vault_dining.jpg',
       caption: 'Intimate candlelit dining in our restored 18th-century stone vaults.',
     },
     {
       title: 'Chef’s Atelier Counter',
       category: GalleryCategory.AMBIANCE,
-      imageUrl: 'https://images.unsplash.com/photo-1550966871-3ed3cdb5ed0c?auto=format&fit=crop&w=1200&q=85',
+      imageUrl: '/images/chef_counter.jpg',
       caption: 'Exclusive front-row counter seating with view of the open culinary pass.',
     },
     {

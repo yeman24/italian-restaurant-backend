@@ -7,10 +7,12 @@ export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private resend: Resend | null = null;
   private readonly fromEmail: string;
+  private readonly alertEmail: string;
 
   constructor(private readonly configService: ConfigService) {
     const apiKey = this.configService.get<string>('resend.apiKey');
     this.fromEmail = this.configService.get<string>('resend.fromEmail', 'concierge@aura-edinburgh.com');
+    this.alertEmail = this.configService.get<string>('resend.alertEmail', '');
 
     if (apiKey && apiKey !== 're_mock') {
       this.resend = new Resend(apiKey);
@@ -27,7 +29,24 @@ export class NotificationsService {
     guests: number;
     experience: string;
     totalEstimate: number;
+    requiresDeposit?: boolean;
   }) {
+    const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[character] || character);
+    const fullName = escapeHtml(reservationDetails.fullName);
+    const confirmationCode = escapeHtml(reservationDetails.confirmationCode);
+    const date = escapeHtml(reservationDetails.date);
+    const timeSlot = escapeHtml(reservationDetails.timeSlot);
+    const experience = escapeHtml(reservationDetails.experience);
+    const subject = reservationDetails.requiresDeposit
+      ? `Reservation Received - AURA Edinburgh (${confirmationCode})`
+      : `Reservation Confirmed - AURA Edinburgh (${confirmationCode})`;
+
     const htmlContent = `
       <div style="font-family: Georgia, serif; background-color: #08090c; color: #f5eed8; padding: 40px; max-width: 600px; margin: auto; border: 1px solid #c5a059;">
         <div style="text-align: center; border-bottom: 1px solid #333; padding-bottom: 20px;">
@@ -35,14 +54,16 @@ export class NotificationsService {
           <p style="font-size: 11px; letter-spacing: 3px; color: #c5a059; text-transform: uppercase;">Edinburgh • Two Michelin Stars</p>
         </div>
         <div style="padding: 30px 0;">
-          <p>Dear ${reservationDetails.fullName},</p>
-          <p>We are delighted to confirm your dining reservation at AURA.</p>
+          <p>Dear ${fullName},</p>
+          <p>${reservationDetails.requiresDeposit
+            ? 'We have received your dining reservation request. Your table will be confirmed once the required deposit is verified.'
+            : 'We are delighted to confirm your dining reservation at AURA.'}</p>
           <div style="background-color: #12151c; padding: 20px; border-left: 3px solid #c5a059; margin: 20px 0;">
-            <p style="margin: 5px 0;"><strong>Reference:</strong> ${reservationDetails.confirmationCode}</p>
-            <p style="margin: 5px 0;"><strong>Date:</strong> ${reservationDetails.date}</p>
-            <p style="margin: 5px 0;"><strong>Sitting:</strong> ${reservationDetails.timeSlot}</p>
+            <p style="margin: 5px 0;"><strong>Reference:</strong> ${confirmationCode}</p>
+            <p style="margin: 5px 0;"><strong>Date:</strong> ${date}</p>
+            <p style="margin: 5px 0;"><strong>Sitting:</strong> ${timeSlot}</p>
             <p style="margin: 5px 0;"><strong>Party:</strong> ${reservationDetails.guests} Guests</p>
-            <p style="margin: 5px 0;"><strong>Experience:</strong> ${reservationDetails.experience}</p>
+            <p style="margin: 5px 0;"><strong>Experience:</strong> ${experience}</p>
           </div>
           <p style="font-size: 12px; color: #aaa;">Location: 14–16 Royal Terrace Vaults, Edinburgh, EH7 5TB.</p>
           <p style="font-size: 12px; color: #aaa;">Dress Code: Smart elegant attire.</p>
@@ -58,7 +79,7 @@ export class NotificationsService {
         await this.resend.emails.send({
           from: this.fromEmail,
           to,
-          subject: `Reservation Confirmed - AURA Edinburgh (${reservationDetails.confirmationCode})`,
+          subject,
           html: htmlContent,
         });
         this.logger.log(`Reservation email dispatched via Resend to ${to}`);
@@ -76,6 +97,28 @@ export class NotificationsService {
     inquiryType: string;
     message: string;
   }) {
+    if (this.resend && this.alertEmail) {
+      const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[character] || character);
+      try {
+        await this.resend.emails.send({
+          from: this.fromEmail,
+          to: this.alertEmail,
+          replyTo: inquiry.email,
+          subject: `New AURA inquiry: ${inquiry.inquiryType}`,
+          html: `<p><strong>${escapeHtml(inquiry.name)}</strong> (${escapeHtml(inquiry.email)})</p><p>Type: ${escapeHtml(inquiry.inquiryType)}</p><p>${escapeHtml(inquiry.message)}</p>`,
+        });
+        return;
+      } catch (err) {
+        this.logger.error(`Failed to dispatch contact alert: ${(err as Error).message}`);
+      }
+    }
+
     this.logger.log(`[CONTACT INQUIRY RECEIVED] From: ${inquiry.name} (${inquiry.email}) | Type: ${inquiry.inquiryType}`);
   }
 }

@@ -63,6 +63,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return JSON.parse(item.value);
   }
 
+  async isHealthy(): Promise<boolean> {
+    if (!this.client) return false;
+    try {
+      return (await this.client.ping()) === 'PONG';
+    } catch {
+      return false;
+    }
+  }
+
   async set(key: string, value: any, ttlSeconds?: number): Promise<void> {
     const serialized = JSON.stringify(value);
     if (this.client) {

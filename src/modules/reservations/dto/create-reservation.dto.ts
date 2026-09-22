@@ -1,14 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DiningSection, DiningService } from '@prisma/client';
+import { Transform } from 'class-transformer';
 import {
   IsDateString,
   IsEmail,
   IsEnum,
   IsInt,
   IsNotEmpty,
-  IsNumber,
   IsOptional,
   IsString,
+  IsBoolean,
   Max,
   Min,
 } from 'class-validator';
@@ -25,6 +26,7 @@ export class CreateReservationDto {
 
   @ApiPropertyOptional({ enum: DiningService, default: DiningService.DINNER })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? (value.toUpperCase() as DiningService) : value))
   @IsEnum(DiningService)
   service?: DiningService;
 
@@ -46,6 +48,9 @@ export class CreateReservationDto {
 
   @ApiPropertyOptional({ enum: DiningSection, default: DiningSection.DINING_ROOM })
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? (value.replace(/-/g, '_').toUpperCase() as DiningSection) : value,
+  )
   @IsEnum(DiningSection)
   seatingPreference?: DiningSection;
 
@@ -55,6 +60,7 @@ export class CreateReservationDto {
   fullName: string;
 
   @ApiProperty({ example: 'eleanor.vance@example.co.uk' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsEmail()
   email: string;
 
@@ -73,7 +79,7 @@ export class CreateReservationDto {
   @IsString()
   specialOccasion?: string;
 
-  @ApiProperty({ example: 580.00 })
-  @IsNumber()
-  totalEstimate: number;
+  @ApiProperty({ description: 'Must be true after the guest accepts the current reservation policy' })
+  @IsBoolean()
+  policyAccepted: boolean;
 }

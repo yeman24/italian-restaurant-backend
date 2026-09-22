@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '@/database/prisma.service';
 import { RegisterDto } from './dto/register.dto';
@@ -85,7 +85,8 @@ export class AuthService {
     };
   }
 
-  async refreshTokens(refreshToken: string) {
+  async refreshTokens(refreshToken?: string) {
+    if (!refreshToken) throw new UnauthorizedException('Invalid or expired refresh token');
     const tokenHash = this.hashToken(refreshToken);
 
     const tokenRecord = await this.prisma.refreshToken.findUnique({
@@ -160,7 +161,7 @@ export class AuthService {
 
     const accessSecret = this.configService.get<string>(
       'jwt.accessSecret',
-      'aura_default_access_secret_key',
+      'aura_dev_access_secret',
     );
     const accessExpiration = this.configService.get<string>('jwt.accessExpiration', '15m');
 
@@ -173,8 +174,8 @@ export class AuthService {
     const rawRefreshToken = crypto.randomBytes(40).toString('hex');
     const tokenHash = this.hashToken(rawRefreshToken);
 
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+    const refreshExpiration = this.configService.get<string>('jwt.refreshExpiration', '7d');
+    const expiresAt = new Date(Date.now() + this.parseDurationMs(refreshExpiration));
 
     await this.prisma.refreshToken.create({
       data: {
@@ -194,5 +195,14 @@ export class AuthService {
 
   private hashToken(token: string): string {
     return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
+  private parseDurationMs(value: string): number {
+    const match = /^(\d+)\s*(s|m|h|d)$/.exec(value.trim());
+    if (!match) return 7 * 24 * 60 * 60 * 1000;
+
+    const amount = Number(match[1]);
+    const unitMs = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] as 's' | 'm' | 'h' | 'd'];
+    return amount * unitMs;
   }
 }

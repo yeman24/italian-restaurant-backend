@@ -16,12 +16,33 @@ export class ConciergeService {
     private readonly menuService: MenuService,
   ) {
     const apiKey = this.config.get<string>('gemini.apiKey');
-    this.model = this.config.get<string>('gemini.model', 'gemini-2.5-flash-lite');
+    this.model = this.config.get<string>('gemini.model', 'gemini-3.1-flash-lite');
     if (apiKey) this.gemini = new GoogleGenAI({ apiKey });
   }
 
+  private async generateWithTimeout(model: string, contents: any, config: any, timeoutMs = 5500): Promise<any> {
+    if (!this.gemini) return null;
+    let timer: NodeJS.Timeout;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        this.gemini.models.generateContent({ model, contents, config }),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timer!);
+    }
+  }
+
   async chat(dto: ConciergeChatDto) {
-    const context = await this.getMenuContext();
+    let context = '';
+    try {
+      context = await this.getMenuContext();
+    } catch (err) {
+      this.logger.warn(`Failed to fetch menu context: ${err instanceof Error ? err.message : 'unknown error'}`);
+    }
 
     if (!this.gemini) {
       return {
@@ -30,22 +51,20 @@ export class ConciergeService {
       };
     }
 
-    try {
-      const history = (dto.history || []).slice(-8).map((item) => ({
-        role: item.role,
-        content: item.content,
-      }));
+    const history = (dto.history || []).slice(-8).map((item) => ({
+      role: item.role,
+      content: item.content,
+    }));
 
-      const response = await this.gemini.models.generateContent({
-        model: this.model,
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: `Conversation so far:\n${history.map((item) => `${item.role}: ${item.content}`).join('\n')}\n\nGuest's latest question:\n${dto.message}` }],
-          },
-        ],
-        config: {
-          systemInstruction: `You are the dining concierge at AURA Edinburgh, an acclaimed fine dining restaurant.
+    const contents = [
+      {
+        role: 'user',
+        parts: [{ text: `Conversation so far:\n${history.map((item) => `${item.role}: ${item.content}`).join('\n')}\n\nGuest's latest question:\n${dto.message}` }],
+      },
+    ];
+
+    const config = {
+      systemInstruction: `You are the dining concierge at AURA Edinburgh, an acclaimed fine dining restaurant.
 
 Key Guidelines:
 - Speak naturally, warmly, and conversationally, like a gracious and knowledgeable host.
@@ -55,22 +74,34 @@ Key Guidelines:
 
 Verified restaurant context:
 ${context}`,
-          temperature: 0.65,
-          maxOutputTokens: 150,
-        },
-      });
+      temperature: 0.65,
+      maxOutputTokens: 150,
+    };
 
-      return {
-        message: response.text || this.localReply(dto.message, context),
-        mode: 'ai',
-      };
-    } catch (error) {
-      this.logger.warn(`Gemini concierge unavailable; using local fallback: ${error instanceof Error ? error.message : 'unknown error'}`);
-      return {
-        message: this.localReply(dto.message, context),
-        mode: 'local',
-      };
+    const modelsToTry = [this.model, 'gemini-3-flash-preview', 'gemini-3.7-flash'].filter(
+      (m, idx, arr) => Boolean(m) && arr.indexOf(m) === idx,
+    );
+
+    for (const modelName of modelsToTry) {
+      try {
+        const response = await this.generateWithTimeout(modelName, contents, config, 5500);
+        const replyText = response?.text?.trim();
+        if (replyText) {
+          return {
+            message: replyText,
+            mode: 'ai',
+          };
+        }
+      } catch (error) {
+        this.logger.warn(`Gemini model ${modelName} unavailable: ${error instanceof Error ? error.message : 'unknown error'}`);
+      }
     }
+
+    this.logger.warn('All AI models failed or timed out; using local fallback');
+    return {
+      message: this.localReply(dto.message, context),
+      mode: 'local',
+    };
   }
 
   private async getMenuContext(): Promise<string> {
@@ -82,7 +113,7 @@ ${context}`,
       this.menuService.findAllTastingMenus(),
     ]);
 
-    const dishes = (dishResult.data || dishResult).map((dish: any) => ({
+    const dishes = (((dishResult as any)?.data || dishResult || []) as Array<any>).map((dish: any) => ({
       name: dish.name,
       description: dish.description,
       provenance: dish.provenance,
@@ -92,11 +123,12 @@ ${context}`,
       winePairing: dish.winePairing,
     }));
 
+    const menus = Array.isArray(tastingMenus) ? tastingMenus : [];
     return JSON.stringify({
       address: '14–16 Royal Terrace Vaults, Edinburgh, EH7 5TB',
       hours: 'Dinner Wed–Sat 17:30–23:00; lunch Fri–Sat 12:00–14:30; Sunday Supper 17:00–22:00',
       reservationPolicy: 'Reservations open 90 days ahead; cancellations require 48 hours notice.',
-      tastingMenus: tastingMenus.map((menu: any) => ({
+      tastingMenus: menus.map((menu: any) => ({
         title: menu.title,
         subtitle: menu.subtitle,
         price: Number(menu.price),
@@ -108,10 +140,21 @@ ${context}`,
     });
   }
 
-  private localReply(message: string, context: string): string {
+  private localReply(message: string, context?: string): string {
     const query = message.toLowerCase();
-    const data = JSON.parse(context);
-    const dishes = data.dishes as Array<any>;
+    let dishes: Array<any> = [];
+    let tastingMenus: Array<any> = [];
+    let address = '14–16 Royal Terrace Vaults, Edinburgh, EH7 5TB';
+    try {
+      if (context) {
+        const data = JSON.parse(context);
+        dishes = Array.isArray(data.dishes) ? data.dishes : [];
+        tastingMenus = Array.isArray(data.tastingMenus) ? data.tastingMenus : [];
+        address = data.address || address;
+      }
+    } catch {
+      // ignore parse failure
+    }
 
     if (/allerg|shellfish|mollusc|gluten|dairy|nut/.test(query)) {
       return 'I can highlight ingredients and dietary tags, but allergy safety must be confirmed by our kitchen team for your specific visit. Tell us your restriction in the reservation form or contact the concierge before booking.';
@@ -133,7 +176,7 @@ ${context}`,
     }
 
     if (/address|location|where|find you|directions|postcode/.test(query)) {
-      return `AURA is located at ${data.address || '14–16 Royal Terrace Vaults, Edinburgh, EH7 5TB'}, situated in historic 18th-century stone vaults.`;
+      return `AURA is located at ${address}, situated in historic 18th-century stone vaults.`;
     }
 
     const dietary = ['vegan', 'vegetarian', 'pescatarian', 'gluten-free', 'dairy-free'].find((tag) => query.includes(tag));
@@ -145,7 +188,7 @@ ${context}`,
         : dishes.filter((dish) => /earthy|mushroom|venison|scallop|sea|fish|meat|vegetable/.test(`${dish.name} ${dish.description}`)).slice(0, 2);
 
       if (matches.length) {
-        return `I would start with ${matches.map((dish) => `${dish.name} (£${dish.price})`).join(' and ')}. Each dish includes provenance and pairing notes on the menu. For the full experience, the Autumn Terroir is ${data.tastingMenus[0]?.coursesCount || 8} courses.`;
+        return `I would start with ${matches.map((dish) => `${dish.name} (£${dish.price})`).join(' and ')}. Each dish includes provenance and pairing notes on the menu. For the full experience, the Autumn Terroir is ${tastingMenus[0]?.coursesCount || 8} courses.`;
       }
     }
 

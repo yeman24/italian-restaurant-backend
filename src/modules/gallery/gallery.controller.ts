@@ -46,7 +46,11 @@ export class GalleryController {
   @Roles(Role.ADMIN, Role.MANAGER)
   @ApiBearerAuth()
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload an image file directly to Cloudinary and add to gallery' })
   upload(

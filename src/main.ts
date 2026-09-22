@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import * as compression from 'compression';
+import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -16,10 +17,42 @@ async function bootstrap() {
   const port = configService.get<number>('port', 4000);
   const apiPrefix = configService.get<string>('apiPrefix', 'api/v1');
   const frontendUrl = configService.get<string>('frontendUrl', 'http://localhost:5173');
+  const nodeEnv = configService.get<string>('nodeEnv', 'development');
+
+  app.enableShutdownHooks();
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
+  if (nodeEnv === 'production') {
+    const requiredConfig = [
+      ['JWT_ACCESS_SECRET', configService.get<string>('jwt.accessSecret')],
+      ['JWT_REFRESH_SECRET', configService.get<string>('jwt.refreshSecret')],
+      ['DATABASE_URL', configService.get<string>('databaseUrl')],
+      ['FRONTEND_URL', configService.get<string>('frontendUrl')],
+      ['RESEND_API_KEY', configService.get<string>('resend.apiKey')],
+      ['RESEND_ALERT_EMAIL', configService.get<string>('resend.alertEmail')],
+      ['CLOUDINARY_CLOUD_NAME', configService.get<string>('cloudinary.cloudName')],
+      ['CLOUDINARY_API_KEY', configService.get<string>('cloudinary.apiKey')],
+      ['CLOUDINARY_API_SECRET', configService.get<string>('cloudinary.apiSecret')],
+    ];
+    if (configService.get<boolean>('depositRequired')) {
+      requiredConfig.push(
+        ['STRIPE_SECRET_KEY', configService.get<string>('stripe.secretKey')],
+        ['STRIPE_WEBHOOK_SECRET', configService.get<string>('stripe.webhookSecret')],
+      );
+    }
+    const missingConfig = requiredConfig.filter(([, value]) => !value).map(([name]) => name);
+    if (missingConfig.length > 0) {
+      throw new Error(`Missing required production configuration: ${missingConfig.join(', ')}`);
+    }
+  }
 
   // Security & Optimization Middleware
   app.use(helmet());
   app.use(compression());
+  const parseCookies = typeof cookieParser === 'function' ? cookieParser : (cookieParser as any)?.default;
+  if (typeof parseCookies === 'function') {
+    app.use(parseCookies());
+  }
 
   // CORS
   app.enableCors({
@@ -27,7 +60,7 @@ async function bootstrap() {
       if (
         !requestOrigin ||
         requestOrigin === frontendUrl ||
-        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin)
+        (nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin))
       ) {
         callback(null, true);
       } else {
@@ -36,7 +69,23 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'stripe-signature'],
+  });
+
+  // Cookie-authenticated mutations must originate from the configured web app.
+  // SameSite cookies are an additional browser control; this protects deployments
+  // where a proxy or embedded client changes cookie behavior.
+  app.use((request, response, next) => {
+    const mutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
+    const isStripeWebhook = request.path === `/${apiPrefix}/payments/webhook`;
+    const requestOrigin = request.get('origin');
+    const localOrigin = nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin || '');
+
+    if (mutation && !isStripeWebhook && requestOrigin && requestOrigin !== frontendUrl && !localOrigin) {
+      return response.status(403).json({ statusCode: 403, message: 'Request origin is not allowed' });
+    }
+
+    next();
   });
 
   // Global API Prefix
@@ -81,18 +130,27 @@ async function bootstrap() {
     .addTag('Contact & Inquiries', 'Concierge messaging, private dining & gazette')
     .build();
 
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document, {
-    customSiteTitle: 'AURA Edinburgh API Documentation',
-    customCss: `
-      .swagger-ui .topbar { background-color: #08090c; border-bottom: 2px solid #c5a059; }
-      .swagger-ui .topbar-wrapper .link { color: #f5eed8; }
-    `,
-  });
+  if (nodeEnv !== 'production') {
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document, {
+      customSiteTitle: 'AURA Edinburgh API Documentation',
+      customCss: `
+        .swagger-ui .topbar { background-color: #08090c; border-bottom: 2px solid #c5a059; }
+        .swagger-ui .topbar-wrapper .link { color: #f5eed8; }
+      `,
+    });
+  }
 
-  await app.listen(port);
+  await app.listen(port, () => {
+    console.log(`Backend is running on port http://localhost:${port} `);
+  });
   logger.log(`AURA API Server listening at http://localhost:${port}/${apiPrefix}`);
-  logger.log(`Swagger OpenAPI documentation at http://localhost:${port}/api/docs`);
+  if (nodeEnv !== 'production') {
+    logger.log(`Swagger OpenAPI documentation at http://localhost:${port}/api/docs`);
+  }
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  new Logger('Bootstrap').error(`Application failed to start: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+});

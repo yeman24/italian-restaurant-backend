@@ -11,9 +11,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly prisma: PrismaService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (request: { cookies?: Record<string, string> }) => request?.cookies?.aura_access_token,
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('jwt.accessSecret', 'aura_default_access_secret_key'),
+      secretOrKey: configService.get<string>('jwt.accessSecret', 'aura_dev_access_secret'),
     });
   }
 

@@ -11,6 +11,7 @@ import { Request } from 'express';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { Public } from '@/common/decorators/public.decorator';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Payments & Deposits')
 @Controller('payments')
@@ -19,9 +20,10 @@ export class PaymentsController {
 
   @Public()
   @Post('create-intent')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Create a Stripe PaymentIntent for reservation table deposit' })
-  createPaymentIntent(@Body() dto: CreatePaymentIntentDto) {
-    return this.paymentsService.createPaymentIntent(dto);
+  createPaymentIntent(@Body() dto: CreatePaymentIntentDto, @Headers('idempotency-key') idempotencyKey?: string) {
+    return this.paymentsService.createPaymentIntent(dto, idempotencyKey);
   }
 
   @Public()

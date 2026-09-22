@@ -21,11 +21,14 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { AdminDashboardModule } from './modules/admin-dashboard/admin-dashboard.module';
 import { ContactMessagesModule } from './modules/contact-messages/contact-messages.module';
 import { ConciergeModule } from './modules/concierge/concierge.module';
+import { CellarModule } from './modules/cellar/cellar.module';
+import { HealthModule } from './health/health.module';
 
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -59,8 +62,14 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
     AdminDashboardModule,
     ContactMessagesModule,
     ConciergeModule,
+    CellarModule,
+    HealthModule,
   ],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,

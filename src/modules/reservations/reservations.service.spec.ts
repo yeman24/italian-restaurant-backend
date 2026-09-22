@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ReservationsService } from './reservations.service';
 import { PrismaService } from '@/database/prisma.service';
 import { NotificationsService } from '@/modules/notifications/notifications.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('ReservationsService', () => {
   let service: ReservationsService;
@@ -12,6 +13,7 @@ describe('ReservationsService', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
   };
 
@@ -25,6 +27,7 @@ describe('ReservationsService', () => {
         ReservationsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: ConfigService, useValue: { get: jest.fn((_key: string, fallback: unknown) => fallback) } },
       ],
     }).compile();
 

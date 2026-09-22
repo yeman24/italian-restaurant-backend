@@ -7,6 +7,7 @@ import {
   Param,
   Query,
   UseGuards,
+  Headers,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ReservationsService } from './reservations.service';
@@ -20,6 +21,8 @@ import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
 import { Roles } from '@/common/decorators/roles.decorator';
 import { ReservationStatus, Role } from '@prisma/client';
+import { OptionalJwtAuthGuard } from '@/common/guards/optional-jwt-auth.guard';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Reservations')
 @Controller('reservations')
@@ -28,6 +31,7 @@ export class ReservationsController {
 
   @Public()
   @Get('availability')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @ApiOperation({ summary: 'Check live seating availability by date and party size' })
   checkAvailability(@Query() dto: CheckAvailabilityDto) {
     return this.reservationsService.checkAvailability(dto);
@@ -35,23 +39,31 @@ export class ReservationsController {
 
   @Public()
   @Post()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Create a new reservation booking' })
-  create(@Body() dto: CreateReservationDto, @CurrentUser('id') userId?: string) {
-    return this.reservationsService.create(dto, userId);
+  create(
+    @Body() dto: CreateReservationDto,
+    @CurrentUser('id') userId?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.reservationsService.create(dto, userId, idempotencyKey);
   }
 
   @Public()
   @Get('code/:code')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Look up booking voucher by reference code (e.g. AURA-123456)' })
-  findByCode(@Param('code') code: string) {
-    return this.reservationsService.findByCode(code);
+  findByCode(@Param('code') code: string, @Query('email') email?: string) {
+    return this.reservationsService.findByCode(code, email);
   }
 
   @Public()
   @Patch('code/:code/cancel')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Cancel booking by reference code' })
-  cancelByCode(@Param('code') code: string) {
-    return this.reservationsService.cancelByCode(code);
+  cancelByCode(@Param('code') code: string, @Body('email') email?: string) {
+    return this.reservationsService.cancelByCode(code, email);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

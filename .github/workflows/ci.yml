@@ -14,9 +14,6 @@ jobs:
 
     env:
       NODE_ENV: test
-      DATABASE_URL: postgresql://aura:aura_secret@localhost:5432/aura_db?schema=public
-      JWT_ACCESS_SECRET: ci_test_access_jwt_secret_aura_2025
-      JWT_REFRESH_SECRET: ci_test_refresh_jwt_secret_aura_2025
 
     steps:
       - name: Checkout repository
@@ -36,6 +33,9 @@ jobs:
 
       - name: Run unit tests
         run: npm test
+
+      - name: Run HTTP contract tests
+        run: npm run test:e2e -- --runInBand
 
       - name: Build NestJS application
         run: npm run build

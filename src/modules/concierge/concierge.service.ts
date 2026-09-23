@@ -16,7 +16,7 @@ export class ConciergeService {
     private readonly menuService: MenuService,
   ) {
     const apiKey = this.config.get<string>('gemini.apiKey');
-    this.model = this.config.get<string>('gemini.model', 'gemini-3.1-flash-lite');
+    this.model = this.config.get<string>('gemini.model', 'gemini-3.6-flash');
     if (apiKey) this.gemini = new GoogleGenAI({ apiKey });
   }
 
@@ -78,7 +78,7 @@ ${context}`,
       maxOutputTokens: 150,
     };
 
-    const modelsToTry = [this.model, 'gemini-3-flash-preview', 'gemini-3.7-flash'].filter(
+    const modelsToTry = [this.model, 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'].filter(
       (m, idx, arr) => Boolean(m) && arr.indexOf(m) === idx,
     );
 

@@ -70,7 +70,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Revoke active refresh tokens and log out' })
   logout(@CurrentUser('id') userId: string, @Res({ passthrough: true }) response: Response) {
-    const cookieOptions = { httpOnly: true, sameSite: 'lax' as const, secure: process.env.NODE_ENV === 'production' };
+    const sameSite = process.env.NODE_ENV === 'production' ? ('none' as const) : ('lax' as const);
+    const cookieOptions = { httpOnly: true, sameSite, secure: process.env.NODE_ENV === 'production' };
     response.clearCookie('aura_access_token', cookieOptions);
     response.clearCookie('aura_refresh_token', cookieOptions);
     return this.authService.logout(userId);
@@ -88,17 +89,18 @@ export class AuthController {
     const secure = process.env.NODE_ENV === 'production';
     const accessExpiration = this.configService.get<string>('jwt.accessExpiration', '15m');
     const refreshExpiration = this.configService.get<string>('jwt.refreshExpiration', '7d');
+    const sameSite = secure ? ('none' as const) : ('lax' as const);
     response.cookie('aura_access_token', accessToken, {
       httpOnly: true,
       secure,
-      sameSite: 'lax',
+      sameSite,
       maxAge: this.parseDurationMs(accessExpiration),
       path: '/',
     });
     response.cookie('aura_refresh_token', refreshToken, {
       httpOnly: true,
       secure,
-      sameSite: 'lax',
+      sameSite,
       maxAge: this.parseDurationMs(refreshExpiration),
       path: '/',
     });

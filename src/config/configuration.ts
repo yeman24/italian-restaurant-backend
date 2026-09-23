@@ -82,7 +82,7 @@ export default (): EnvironmentVariables => ({
   },
   gemini: {
     apiKey: process.env.GEMINI_API_KEY || undefined,
-    model: process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
+    model: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
   },
   throttle: {
     ttl: parseInt(process.env.THROTTLE_TTL || '60', 10),

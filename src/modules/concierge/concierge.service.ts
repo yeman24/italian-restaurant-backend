@@ -16,11 +16,11 @@ export class ConciergeService {
     private readonly menuService: MenuService,
   ) {
     const apiKey = this.config.get<string>('gemini.apiKey');
-    this.model = this.config.get<string>('gemini.model', 'gemini-3.6-flash');
+    this.model = this.config.get<string>('gemini.model', 'gemini-3.5-flash-lite');
     if (apiKey) this.gemini = new GoogleGenAI({ apiKey });
   }
 
-  private async generateWithTimeout(model: string, contents: any, config: any, timeoutMs = 5500): Promise<any> {
+  private async generateWithTimeout(model: string, contents: any, config: any, timeoutMs = 10000): Promise<any> {
     if (!this.gemini) return null;
     let timer: NodeJS.Timeout;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -78,13 +78,13 @@ ${context}`,
       maxOutputTokens: 150,
     };
 
-    const modelsToTry = [this.model, 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'].filter(
+    const modelsToTry = [this.model, 'gemini-3.5-flash-lite', 'gemini-3.6-flash'].filter(
       (m, idx, arr) => Boolean(m) && arr.indexOf(m) === idx,
     );
 
     for (const modelName of modelsToTry) {
       try {
-        const response = await this.generateWithTimeout(modelName, contents, config, 5500);
+        const response = await this.generateWithTimeout(modelName, contents, config, 10000);
         const replyText = response?.text?.trim();
         if (replyText) {
           return {

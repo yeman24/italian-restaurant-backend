@@ -5,6 +5,7 @@ import { CreateDishDto } from './dto/create-dish.dto';
 import { UpdateDishDto } from './dto/update-dish.dto';
 import { FilterDishesDto } from './dto/filter-dishes.dto';
 import { CreateTastingMenuDto } from './dto/create-tasting-menu.dto';
+import { UpdateTastingMenuDto } from './dto/update-tasting-menu.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
@@ -22,12 +23,22 @@ export class MenuService {
       throw new ConflictException('A dish with this name or slug already exists');
     }
 
+    let resolvedCategoryId = dto.categoryId;
+    const cat = await this.prisma.category.findFirst({
+      where: {
+        OR: [{ id: dto.categoryId }, { slug: dto.categoryId }],
+      },
+    });
+    if (cat) {
+      resolvedCategoryId = cat.id;
+    }
+
     const dish = await this.prisma.dish.create({
       data: {
         slug,
         name: dto.name,
         gaelicName: dto.gaelicName,
-        categoryId: dto.categoryId,
+        categoryId: resolvedCategoryId,
         courseNumber: dto.courseNumber,
         description: dto.description,
         story: dto.story,
@@ -124,10 +135,20 @@ export class MenuService {
   async updateDish(id: string, dto: UpdateDishDto) {
     await this.findDishByIdOrSlug(id);
 
+    let resolvedCategoryId: string | undefined = undefined;
+    if (dto.categoryId) {
+      const cat = await this.prisma.category.findFirst({
+        where: {
+          OR: [{ id: dto.categoryId }, { slug: dto.categoryId }],
+        },
+      });
+      resolvedCategoryId = cat ? cat.id : dto.categoryId;
+    }
+
     const data: Prisma.DishUpdateInput = {
       ...(dto.name && { name: dto.name }),
       ...(dto.gaelicName !== undefined && { gaelicName: dto.gaelicName }),
-      ...(dto.categoryId && { category: { connect: { id: dto.categoryId } } }),
+      ...(resolvedCategoryId && { category: { connect: { id: resolvedCategoryId } } }),
       ...(dto.courseNumber !== undefined && { courseNumber: dto.courseNumber }),
       ...(dto.description && { description: dto.description }),
       ...(dto.story && { story: dto.story }),
@@ -161,9 +182,14 @@ export class MenuService {
   // --- Tasting Menus ---
 
   async createTastingMenu(dto: CreateTastingMenuDto) {
-    const slug = dto.slug || dto.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const slug = dto.slug || dto.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-    return this.prisma.tastingMenu.create({
+    const existing = await this.prisma.tastingMenu.findUnique({ where: { slug } });
+    if (existing) {
+      throw new ConflictException('A tasting menu with this title/slug already exists');
+    }
+
+    const menu = await this.prisma.tastingMenu.create({
       data: {
         slug,
         title: dto.title,
@@ -178,6 +204,9 @@ export class MenuService {
         courses: dto.courses,
       },
     });
+
+    await this.redis.delPattern('aura:dishes:*');
+    return menu;
   }
 
   async findAllTastingMenus(includeInactive = false) {
@@ -188,15 +217,50 @@ export class MenuService {
     });
   }
 
-  async findTastingMenuBySlug(slug: string) {
-    const menu = await this.prisma.tastingMenu.findUnique({
-      where: { slug },
+  async findTastingMenuBySlug(slugOrId: string) {
+    const menu = await this.prisma.tastingMenu.findFirst({
+      where: {
+        OR: [{ id: slugOrId }, { slug: slugOrId }],
+      },
     });
 
     if (!menu) {
-      throw new NotFoundException(`Tasting menu '${slug}' not found`);
+      throw new NotFoundException(`Tasting menu '${slugOrId}' not found`);
     }
 
     return menu;
   }
+
+  async updateTastingMenu(id: string, dto: UpdateTastingMenuDto) {
+    const menu = await this.findTastingMenuBySlug(id);
+
+    const data: Prisma.TastingMenuUpdateInput = {
+      ...(dto.title && { title: dto.title }),
+      ...(dto.subtitle && { subtitle: dto.subtitle }),
+      ...(dto.description && { description: dto.description }),
+      ...(dto.price !== undefined && { price: new Prisma.Decimal(dto.price) }),
+      ...(dto.pairingPrice !== undefined && { pairingPrice: new Prisma.Decimal(dto.pairingPrice) }),
+      ...(dto.prestigePairingPrice !== undefined && { prestigePairingPrice: new Prisma.Decimal(dto.prestigePairingPrice) }),
+      ...(dto.coursesCount !== undefined && { coursesCount: dto.coursesCount }),
+      ...(dto.duration !== undefined && { duration: dto.duration }),
+      ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      ...(dto.courses !== undefined && { courses: dto.courses }),
+    };
+
+    const updated = await this.prisma.tastingMenu.update({
+      where: { id: menu.id },
+      data,
+    });
+
+    await this.redis.delPattern('aura:dishes:*');
+    return updated;
+  }
+
+  async removeTastingMenu(id: string) {
+    const menu = await this.findTastingMenuBySlug(id);
+    await this.prisma.tastingMenu.delete({ where: { id: menu.id } });
+    await this.redis.delPattern('aura:dishes:*');
+    return { message: 'Tasting menu removed successfully' };
+  }
 }
+

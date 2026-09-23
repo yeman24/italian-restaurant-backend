@@ -15,6 +15,7 @@ import { CreateDishDto } from './dto/create-dish.dto';
 import { UpdateDishDto } from './dto/update-dish.dto';
 import { FilterDishesDto } from './dto/filter-dishes.dto';
 import { CreateTastingMenuDto } from './dto/create-tasting-menu.dto';
+import { UpdateTastingMenuDto } from './dto/update-tasting-menu.dto';
 import { Public } from '@/common/decorators/public.decorator';
 import { JwtAuthGuard } from '@/common/guards/jwt-auth.guard';
 import { RolesGuard } from '@/common/guards/roles.guard';
@@ -91,4 +92,23 @@ export class MenuController {
   createTastingMenu(@Body() dto: CreateTastingMenuDto) {
     return this.menuService.createTastingMenu(dto);
   }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.MANAGER)
+  @ApiBearerAuth()
+  @Patch('tasting-menus/:id')
+  @ApiOperation({ summary: 'Update a tasting menu (Admin/Manager)' })
+  updateTastingMenu(@Param('id') id: string, @Body() dto: UpdateTastingMenuDto) {
+    return this.menuService.updateTastingMenu(id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @Delete('tasting-menus/:id')
+  @ApiOperation({ summary: 'Delete a tasting menu (Admin)' })
+  removeTastingMenu(@Param('id') id: string) {
+    return this.menuService.removeTastingMenu(id);
+  }
 }
+

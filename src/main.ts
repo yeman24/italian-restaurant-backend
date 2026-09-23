@@ -23,26 +23,33 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
 
   if (nodeEnv === 'production') {
-    const requiredConfig = [
+    const criticalConfig = [
       ['JWT_ACCESS_SECRET', configService.get<string>('jwt.accessSecret')],
       ['JWT_REFRESH_SECRET', configService.get<string>('jwt.refreshSecret')],
       ['DATABASE_URL', configService.get<string>('databaseUrl')],
       ['FRONTEND_URL', configService.get<string>('frontendUrl')],
+    ];
+    if (configService.get<boolean>('depositRequired')) {
+      criticalConfig.push(
+        ['STRIPE_SECRET_KEY', configService.get<string>('stripe.secretKey')],
+        ['STRIPE_WEBHOOK_SECRET', configService.get<string>('stripe.webhookSecret')],
+      );
+    }
+    const missingCritical = criticalConfig.filter(([, value]) => !value).map(([name]) => name);
+    if (missingCritical.length > 0) {
+      throw new Error(`Missing required production configuration: ${missingCritical.join(', ')}`);
+    }
+
+    const optionalConfig = [
       ['RESEND_API_KEY', configService.get<string>('resend.apiKey')],
       ['RESEND_ALERT_EMAIL', configService.get<string>('resend.alertEmail')],
       ['CLOUDINARY_CLOUD_NAME', configService.get<string>('cloudinary.cloudName')],
       ['CLOUDINARY_API_KEY', configService.get<string>('cloudinary.apiKey')],
       ['CLOUDINARY_API_SECRET', configService.get<string>('cloudinary.apiSecret')],
     ];
-    if (configService.get<boolean>('depositRequired')) {
-      requiredConfig.push(
-        ['STRIPE_SECRET_KEY', configService.get<string>('stripe.secretKey')],
-        ['STRIPE_WEBHOOK_SECRET', configService.get<string>('stripe.webhookSecret')],
-      );
-    }
-    const missingConfig = requiredConfig.filter(([, value]) => !value).map(([name]) => name);
-    if (missingConfig.length > 0) {
-      throw new Error(`Missing required production configuration: ${missingConfig.join(', ')}`);
+    const missingOptional = optionalConfig.filter(([, value]) => !value).map(([name]) => name);
+    if (missingOptional.length > 0) {
+      logger.warn(`Optional services not configured: ${missingOptional.join(', ')}. Operating in simulation/fallback mode.`);
     }
   }
 
@@ -54,16 +61,28 @@ async function bootstrap() {
     app.use(parseCookies());
   }
 
-  // CORS
+  // CORS & Origin Validation
+  const allowedOrigins = (frontendUrl || '')
+    .split(',')
+    .map((url) => url.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+
+  const isOriginAllowed = (origin?: string): boolean => {
+    if (!origin) return true;
+    const cleanOrigin = origin.replace(/\/$/, '');
+    if (allowedOrigins.includes(cleanOrigin)) return true;
+    if (nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
+    // Allow Vercel preview and production deployments
+    if (cleanOrigin.endsWith('.vercel.app')) return true;
+    return false;
+  };
+
   app.enableCors({
     origin: (requestOrigin, callback) => {
-      if (
-        !requestOrigin ||
-        requestOrigin === frontendUrl ||
-        (nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin))
-      ) {
+      if (isOriginAllowed(requestOrigin)) {
         callback(null, true);
       } else {
+        logger.warn(`Origin blocked by CORS: ${requestOrigin}`);
         callback(new Error('Not allowed by CORS'));
       }
     },
@@ -79,9 +98,8 @@ async function bootstrap() {
     const mutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
     const isStripeWebhook = request.path === `/${apiPrefix}/payments/webhook`;
     const requestOrigin = request.get('origin');
-    const localOrigin = nodeEnv !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin || '');
 
-    if (mutation && !isStripeWebhook && requestOrigin && requestOrigin !== frontendUrl && !localOrigin) {
+    if (mutation && !isStripeWebhook && requestOrigin && !isOriginAllowed(requestOrigin)) {
       return response.status(403).json({ statusCode: 403, message: 'Request origin is not allowed' });
     }
 
@@ -141,10 +159,9 @@ async function bootstrap() {
     });
   }
 
-  await app.listen(port, () => {
-    console.log(`Backend is running on port http://localhost:${port} `);
+  await app.listen(port, '0.0.0.0', () => {
+    logger.log(`AURA API Server listening at http://0.0.0.0:${port}/${apiPrefix}`);
   });
-  logger.log(`AURA API Server listening at http://localhost:${port}/${apiPrefix}`);
   if (nodeEnv !== 'production') {
     logger.log(`Swagger OpenAPI documentation at http://localhost:${port}/api/docs`);
   }

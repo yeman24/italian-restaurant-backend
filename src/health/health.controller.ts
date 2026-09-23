@@ -32,9 +32,6 @@ export class HealthController {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
       const redisHealthy = await this.redis.isHealthy();
-      if (process.env.NODE_ENV === 'production' && !redisHealthy) {
-        throw new Error('Redis is not ready');
-      }
       return { status: 'ok', dependencies: { database: 'ok', redis: redisHealthy ? 'ok' : 'degraded' } };
     } catch {
       throw new ServiceUnavailableException({ status: 'not_ready' });

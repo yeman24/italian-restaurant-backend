@@ -6,8 +6,8 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('--- Seeding AURA Edinburgh Database ---');
 
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('Refusing to run the development seed script in production.');
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_PRODUCTION_SEED !== 'true') {
+    throw new Error('Refusing to run the development seed script in production without ALLOW_PRODUCTION_SEED=true.');
   }
 
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
